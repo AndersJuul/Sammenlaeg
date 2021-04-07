@@ -70,8 +70,8 @@ namespace Sammenlaeg.Wpf
                 Log.Logger.Information($"Læste {oensker.Length} ønsker"); Thread.Sleep(50);
 
                 // ---------
-                // Create the linear solver with the GLOP backend.
-                var solver = Solver.CreateSolver("GLOP");
+                // Create the linear solver with the SCIP backend.
+                var solver = Solver.CreateSolver("SCIP");
 
                 // Create the variables for pupil-presence-in-class.
                 // All integer and 0/1 (meaning in or not in class)
@@ -80,8 +80,9 @@ namespace Sammenlaeg.Wpf
                     foreach (var @class in classes)
                     {
                         var varname = GetPupilInClassVarname(elevDto, @class);
-                        solver.MakeNumVar(0.0, 1.0, varname).SetInteger(true);
-                        solver.MakeConstraint(0.0, 1.0, varname);
+                        var intVar = solver.MakeIntVar(0.0, 1.0, varname);
+                        //solver.Add(intVar <= 1.0);
+                        //solver.Add(intVar >= 0.0);
                     }
                 }
 
@@ -91,10 +92,29 @@ namespace Sammenlaeg.Wpf
                     foreach (var @class in classes)
                     {
                         var varname = GetOenskeMatchInClassVarname(oenskeDto, @class);
-                        solver.MakeNumVar(0.0, 2.0, varname).SetInteger(true);
-                        solver.MakeConstraint(0.0, 2.0, varname);
+                        var elev1 = pupils.Single(x => x.Id == oenskeDto.ElevId1);
+                        var varnameElev1 = GetPupilInClassVarname(elev1, @class);
+                        var elev2 = pupils.Single(x => x.Id == oenskeDto.ElevId2);
+                        var varnameElev2 = GetPupilInClassVarname(elev2, @class);
+                        var intVar = solver.MakeIntVar(0.0, 2.0, varname);
+                        solver.Add(intVar <= 2);
+                        solver.Add(intVar >= solver.variables().Single(x=>x.Name()==varnameElev1)+ solver.variables().Single(x => x.Name() == varnameElev2));
                     }
                 }
+
+                // Create the variables for oensker-match-in-class.
+                foreach (var oenskeDto in oensker)
+                {
+                    var varname = $"OenskeMatch.{oenskeDto.ElevId1}.{oenskeDto.ElevId2}";
+                    var intVar = solver.MakeIntVar(0.0, 1.0, varname);
+                    foreach (var @class in classes)
+                    {
+                        var varnamez = GetOenskeMatchInClassVarname(oenskeDto, @class);
+                        solver.Add(intVar >= solver.variables().Single(x => x.Name() == varnameElev1) + solver.variables().Single(x => x.Name() == varnameElev2));
+                    }
+                }
+
+
 
                 Log.Logger.Information("Number of variables = " + solver.NumVariables()); Thread.Sleep(50);
 
@@ -127,13 +147,27 @@ namespace Sammenlaeg.Wpf
                     foreach (var @class in classes)
                     {
                         var variable = solver.variables().Single(x => x.Name() == GetPupilInClassVarname(elevDto, @class));
-                        objective.SetCoefficient(variable, 1);
+                        objective.SetCoefficient(variable, 10);
+                    }
+                }
+                // Create the variables for oensker-match-in-class.
+                foreach (var oenskeDto in oensker)
+                {
+                    foreach (var @class in classes)
+                    {
+                        var varname = GetOenskeMatchInClassVarname(oenskeDto, @class);
+                        var intVar = solver.variables().Single(x=>x.Name()==varname);
+                        objective.SetCoefficient(intVar,-1);
                     }
                 }
                 objective.SetMaximization();
 
+                
+                
                 solver.Solve();
 
+                
+                
                 Log.Logger.Information("Solution:Objective value = " + solver.Objective().Value()); Thread.Sleep(50);
                 foreach (var variable in solver.variables().Where(x=>x.SolutionValue()>=0))
                 {
